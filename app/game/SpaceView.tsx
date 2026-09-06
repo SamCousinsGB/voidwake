@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { Universe, SYSTEMS, STATION, FACTIONS, SHIPS, WEAPONS } from './engine';
 import { createSpaceBackground } from './SpaceBackground';
 import { makeShip,makeStation,disposeModel } from './ShipModels';
+import { createBattleEffects } from './BattleEffects';
 import { renderFlightLayers } from './renderLayers';
 
 const noiseGLSL=`
@@ -31,6 +32,7 @@ export default function SpaceView({game,onTick}:{game:Universe;onTick:()=>void})
   let seed=8462;function random(){seed=(seed*16807)%2147483647;return(seed-1)/2147483646;}
   celestial.add(new THREE.AmbientLight(0x75869a,2));const rockLight=sun.clone();celestial.add(rockLight);const background=createSpaceBackground(celestial,renderer.getPixelRatio());
   let systemGroup=new THREE.Group();celestial.add(systemGroup);let renderedSystem=-1;let player=makeShip(game.s.ship);scene.add(player);let renderedShip=game.s.ship;
+  const battleEffects=createBattleEffects(scene);let renderedOwner=game.faction;
   const contactMeshes=new Map<string,THREE.Object3D>();const bulletMeshes=new Map<number,THREE.Group>();const beamMeshes=new Map<number,THREE.Group>();
   const targetRing=new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-35,-20,0),new THREE.Vector3(-35,-35,0),new THREE.Vector3(-35,-35,0),new THREE.Vector3(-20,-35,0),new THREE.Vector3(20,-35,0),new THREE.Vector3(35,-35,0),new THREE.Vector3(35,-35,0),new THREE.Vector3(35,-20,0),new THREE.Vector3(-35,20,0),new THREE.Vector3(-35,35,0),new THREE.Vector3(-35,35,0),new THREE.Vector3(-20,35,0),new THREE.Vector3(20,35,0),new THREE.Vector3(35,35,0),new THREE.Vector3(35,35,0),new THREE.Vector3(35,20,0)]),new THREE.LineBasicMaterial({color:0x73d9e2,transparent:true,opacity:.8}));scene.add(targetRing);
   const waypointRing=new THREE.Mesh(new THREE.RingGeometry(12,13,32),new THREE.MeshBasicMaterial({color:0x9bd4e8,transparent:true,opacity:.6}));scene.add(waypointRing);
@@ -41,7 +43,7 @@ export default function SpaceView({game,onTick}:{game:Universe;onTick:()=>void})
   const rebuild=()=>{
    celestial.remove(systemGroup);disposeTree(systemGroup);systemGroup=new THREE.Group();celestial.add(systemGroup);labels.replaceChildren();labelMap.clear();
    for(const m of contactMeshes.values()){scene.remove(m);disposeModel(m);}contactMeshes.clear();
-   const sys=SYSTEMS[game.s.system],f=FACTIONS[sys.factionId];background.setSystem(f.color,f.secondary,f.style,sys.id);
+   const sys=SYSTEMS[game.s.system],f=FACTIONS[game.faction];background.setSystem(f.color,f.secondary,f.style,sys.id);
    for(const w of game.worlds){
     const world=planet(w.radius,w.color,sys.id*2.73+w.x*.005,w.type);world.position.set(w.x,w.y,-110);systemGroup.add(world);
     if(w.type!=='barren'){
@@ -54,7 +56,7 @@ export default function SpaceView({game,onTick}:{game:Universe;onTick:()=>void})
    for(let i=0;i<240;i++){const a=random()*Math.PI*2,r=1150+random()*210;dummy.position.set(-425+Math.cos(a)*r,320+Math.sin(a)*r,-50+random()*50);dummy.rotation.set(random()*6,random()*6,random()*6);const scale=3+random()*13;dummy.scale.set(scale,scale*.7,scale*.8);dummy.updateMatrix();rocks.setMatrixAt(i,dummy.matrix);}systemGroup.add(rocks);
    const star=planet(180,'#ffba6c',sys.id,'lava');star.position.set(-1500,2700,-70);systemGroup.add(star);
    const corona=new THREE.Mesh(new THREE.PlaneGeometry(1100,1100),new THREE.ShaderMaterial({transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',fragmentShader:'varying vec2 vUv;void main(){float d=length(vUv-.5)*2.;float glow=pow(max(0.,1.-d),4.);gl_FragColor=vec4(1.,.43,.1,glow*.6);}'}));corona.position.copy(star.position);systemGroup.add(corona);
-   makeLabel('sun',sys.name.toUpperCase(),'MAIN-SEQUENCE STAR','#f1ba81');renderedSystem=game.s.system;
+   makeLabel('sun',sys.name.toUpperCase(),'MAIN-SEQUENCE STAR','#f1ba81');renderedSystem=game.s.system;renderedOwner=game.faction;
   };
   let width=0,height=0;function resize(){width=host.clientWidth;height=host.clientHeight;renderer.setSize(width,height);}
   const observer=new ResizeObserver(resize);observer.observe(host);resize();
@@ -69,20 +71,20 @@ export default function SpaceView({game,onTick}:{game:Universe;onTick:()=>void})
   };
   const wheel=(event:WheelEvent)=>{event.preventDefault();game.zoom=Math.min(1.8,Math.max(.5,game.zoom-event.deltaY*.0006));};
   renderer.domElement.addEventListener('pointerdown',click);renderer.domElement.addEventListener('wheel',wheel,{passive:false});
-  let last=performance.now(),uiElapsed=0,raf=0;function frame(now:number){const dt=Math.min((now-last)/1000,.05);last=now;game.update(dt);if(renderedSystem!==game.s.system)rebuild();const s=game.s;
-   camera.position.x+=(s.x-camera.position.x)*Math.min(dt*3,1);camera.position.y+=(s.y+90-camera.position.y)*Math.min(dt*3,1);const span=950/game.zoom;camera.left=-span*width/height/2;camera.right=-camera.left;camera.top=span/2;camera.bottom=-span/2;camera.updateProjectionMatrix();camera.updateMatrixWorld();background.update(camera.position.x,camera.position.y,s.time);
+  let last=performance.now(),uiElapsed=0,raf=0;function frame(now:number){const dt=Math.min((now-last)/1000,.05);last=now;game.update(dt);if(renderedSystem!==game.s.system||renderedOwner!==game.faction)rebuild();const s=game.s;
+   camera.position.x+=(s.x-camera.position.x)*Math.min(dt*3,1);camera.position.y+=(s.y+90-camera.position.y)*Math.min(dt*3,1);const span=950/game.zoom;camera.left=-span*width/height/2;camera.right=-camera.left;camera.top=span/2;camera.bottom=-span/2;camera.position.x+=Math.sin(now*.051)*game.shake*.18;camera.position.y+=Math.cos(now*.063)*game.shake*.18;camera.updateProjectionMatrix();camera.updateMatrixWorld();background.update(camera.position.x,camera.position.y,s.time);
    if(renderedShip!==s.ship){scene.remove(player);disposeModel(player);player=makeShip(s.ship);scene.add(player);renderedShip=s.ship;}
    player.position.set(s.x,s.y,30);player.rotation.z=s.angle;player.visible=!game.docked;
    for(const child of player.children)if(child.name==='engine'){child.scale.y=.45+Math.hypot(s.vx,s.vy)/game.stats.speed*1.4;child.position.y=child.userData.baseY-(child.scale.y-1)*10;}
    for(const c of game.contacts){if(c.kind==='planet')continue;let m=contactMeshes.get(c.id);
-    if(!m){m=c.kind==='station'?makeStation(c.faction??game.faction):c.kind==='salvage'?new THREE.Mesh(new THREE.OctahedronGeometry(7),new THREE.MeshBasicMaterial({color:0xffc778})):makeShip(c.ship??'courier',c.kind==='hostile');scene.add(m);contactMeshes.set(c.id,m);if(c.kind==='station')makeLabel(c.id,c.name.toUpperCase(),FACTIONS[game.faction].short+' STATION',FACTIONS[game.faction].color);}
+    if(!m){m=c.kind==='station'?makeStation(c.faction??game.faction):c.kind==='salvage'?new THREE.Mesh(new THREE.OctahedronGeometry(7),new THREE.MeshBasicMaterial({color:0xffc778})):makeShip(c.ship??'courier',c.kind==='hostile');scene.add(m);contactMeshes.set(c.id,m);if(c.kind==='station'){if(c.role==='battery')m.scale.setScalar(.32);if(c.role==='blockade')m.scale.setScalar(1.35);makeLabel(c.id,c.name.toUpperCase(),c.role==='blockade'?'JUMP LANE INTERDICTOR':c.role==='battery'?'SURFACE MISSILE BATTERY':FACTIONS[game.faction].short+' STATION',c.role==='blockade'?'#f48c82':FACTIONS[game.faction].color);}if(c.role==='relic'){m.scale.setScalar(3);makeLabel(c.id,'LOST RESEARCH TENDER','ANTIMATTER SIGNATURE','#d9acff');}}
     m.position.set(c.x,c.y,c.kind==='station'?15:30);m.rotation.z=c.kind==='station'?s.time*.012:c.angle;
     for(const child of m.children)if(child.name==='engine')child.scale.y=c.distressed?1.4:.65;
    }
-   for(const [id,m]of contactMeshes)if(!game.contacts.some(c=>c.id===id&&c.hull>0)){scene.remove(m);disposeModel(m);contactMeshes.delete(id);}
+   for(const [id,m]of contactMeshes)if(!game.contacts.some(c=>c.id===id&&c.hull>0)){scene.remove(m);disposeModel(m);contactMeshes.delete(id);labelMap.get(id)?.remove();labelMap.delete(id);}
    for(const b of game.bullets){let m=bulletMeshes.get(b.id);
-    if(!m){m=new THREE.Group();const color=b.enemy?'#ff7959':WEAPONS[b.kind??'torpedo'].color;
-     const core=new THREE.Mesh(b.kind==='missile'?new THREE.CapsuleGeometry(2.2,10,4,8):new THREE.SphereGeometry(5,16,12),new THREE.MeshBasicMaterial({color}));m.add(core);
+    if(!m){m=new THREE.Group();const color=b.enemy&&b.kind!=='antimatter'?'#ff7959':WEAPONS[b.kind??'torpedo'].color;
+     const core=new THREE.Mesh(b.kind==='missile'?new THREE.CapsuleGeometry(2.2,10,4,8):new THREE.SphereGeometry(b.kind==='antimatter'?11:b.kind==='torpedo'?8:5,16,12),new THREE.MeshBasicMaterial({color}));m.add(core);
      const halo=new THREE.Mesh(new THREE.PlaneGeometry(34,34),new THREE.ShaderMaterial({transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,uniforms:{color:{value:new THREE.Color(color)}},vertexShader:'varying vec2 uvPos;void main(){uvPos=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',fragmentShader:'varying vec2 uvPos;uniform vec3 color;void main(){float d=length(uvPos-.5)*2.;gl_FragColor=vec4(color,exp(-d*d*5.)*.7);}'}));m.add(halo);
      const trail=new THREE.Line(new THREE.BufferGeometry().setAttribute('position',new THREE.BufferAttribute(new Float32Array(35*3),3)),new THREE.LineBasicMaterial({color,transparent:true,opacity:.6,blending:THREE.AdditiveBlending}));trail.name='trail';trail.frustumCulled=false;m.add(trail);scene.add(m);bulletMeshes.set(b.id,m);
     }
@@ -92,13 +94,13 @@ export default function SpaceView({game,onTick}:{game:Universe;onTick:()=>void})
     (b.trail??[]).forEach((p,i)=>positions.setXYZ(i,p.x,p.y,34));positions.needsUpdate=true;trail.geometry.setDrawRange(0,b.trail?.length??0);
    }
    for(const[id,m]of bulletMeshes)if(!game.bullets.some(b=>b.id===id)){scene.remove(m);disposeModel(m);bulletMeshes.delete(id);}
-   for(const b of game.beams){let m=beamMeshes.get(b.id);if(!m){m=new THREE.Group();for(const [width,opacity,color] of [[12,.12,b.color],[4,.7,b.color],[1.3,1,'#ffffff']] as const){const beam=new THREE.Mesh(new THREE.PlaneGeometry(width,1),new THREE.MeshBasicMaterial({color,transparent:true,opacity,depthWrite:false,blending:THREE.AdditiveBlending}));beam.userData.opacity=opacity;m.add(beam);}scene.add(m);beamMeshes.set(b.id,m);}m.position.set((b.x+b.tx)/2,(b.y+b.ty)/2,50);m.rotation.z=Math.atan2(b.ty-b.y,b.tx-b.x)-Math.PI/2;m.scale.y=Math.hypot(b.tx-b.x,b.ty-b.y);for(const child of m.children)((child as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity=child.userData.opacity*(b.life/b.maxLife);}
+   for(const b of game.beams){let m=beamMeshes.get(b.id);if(!m){m=new THREE.Group();for(const [width,opacity,color] of [[12,.12,b.color],[4,.7,b.color],[1.3,1,'#ffffff']] as const){const beam=new THREE.Mesh(new THREE.PlaneGeometry(width,1),new THREE.MeshBasicMaterial({color,transparent:true,opacity,depthWrite:false,blending:THREE.AdditiveBlending}));beam.userData.opacity=opacity;m.add(beam);}scene.add(m);beamMeshes.set(b.id,m);}m.position.set((b.x+b.tx)/2,(b.y+b.ty)/2,50);m.rotation.z=Math.atan2(b.ty-b.y,b.tx-b.x)-Math.PI/2;m.scale.y=Math.hypot(b.tx-b.x,b.ty-b.y);for(const child of m.children)((child as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity=child.userData.opacity*(b.continuous?.82+Math.sin(now*.05)*.12:b.life/b.maxLife);}
    for(const[id,m]of beamMeshes)if(!game.beams.some(b=>b.id===id)){scene.remove(m);disposeModel(m);beamMeshes.delete(id);}
    game.particles.slice(0,1024).forEach((p,i)=>{particlePositions.set([p.x,p.y,40],i*3);const color=new THREE.Color(p.color).multiplyScalar(p.life/p.maxLife);particleColors.set([color.r,color.g,color.b],i*3);});particleGeo.attributes.position.needsUpdate=true;particleGeo.attributes.color.needsUpdate=true;particleGeo.setDrawRange(0,Math.min(game.particles.length,1024));
    const selected=game.selected;targetRing.visible=!!selected;if(selected){targetRing.position.set(selected.x,selected.y,80);targetRing.scale.setScalar((selected.radius??35)/30);(targetRing.material as THREE.LineBasicMaterial).color.set(game.isHostile(selected)?0xf17c6d:0x84d6cb);}
    waypointRing.visible=!!game.waypoint;if(game.waypoint)waypointRing.position.set(game.waypoint.x,game.waypoint.y,30);
-   for(const w of game.worlds)placeLabel(w.id,w.x,w.y,w.radius*height/span+18);placeLabel('station',STATION.x,STATION.y,100*height/span+12);placeLabel('sun',-1500,2700,180*height/span+18);
-   renderFlightLayers(renderer,celestial,scene,camera);uiElapsed+=dt;if(uiElapsed>.12){tickRef.current();uiElapsed=0;}raf=requestAnimationFrame(frame);
+   for(const w of game.worlds)placeLabel(w.id,w.x,w.y,w.radius*height/span+18);for(const c of game.contacts)if(c.kind==='station'||c.role==='relic')placeLabel(c.id,c.x,c.y,(c.radius??40)*height/span+15);placeLabel('sun',-1500,2700,180*height/span+18);
+   battleEffects.update(game.effects);renderFlightLayers(renderer,celestial,scene,camera);uiElapsed+=dt;if(uiElapsed>.12){tickRef.current();uiElapsed=0;}raf=requestAnimationFrame(frame);
   }raf=requestAnimationFrame(frame);
   return()=>{cancelAnimationFrame(raf);observer.disconnect();renderer.domElement.removeEventListener('pointerdown',click);renderer.domElement.removeEventListener('wheel',wheel);disposeTree(scene);disposeTree(celestial);renderer.dispose();host.replaceChildren();};
  },[game]);

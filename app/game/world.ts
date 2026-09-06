@@ -1,5 +1,5 @@
 export type FactionId = 'union' | 'traders' | 'syndicate' | 'helios' | 'verdant' | 'forge';
-export type WeaponId = 'phaser' | 'laser' | 'torpedo' | 'missile';
+export type WeaponId = 'phaser' | 'laser' | 'torpedo' | 'missile' | 'antimatter';
 export const FACTIONS = {
  union: {name:'Concord Union',short:'Concord',color:'#7ecfff',secondary:'#416bc6',hull:'#a7bdcc',dark:'#233c59',symbol:'star',style:0,doctrine:'Balanced fleets · phaser arrays',capital:'Solace'},
  traders: {name:'Free Traders',short:'Free Traders',color:'#ffc879',secondary:'#b57542',hull:'#bbaa86',dark:'#433b32',symbol:'compass',style:1,doctrine:'Cargo carriers · missile racks',capital:'Carina'},
@@ -10,10 +10,11 @@ export const FACTIONS = {
 } as const;
 export const factionIds = Object.keys(FACTIONS) as FactionId[];
 export const WEAPONS = {
- phaser:{name:'Phaser array',short:'Phaser',key:'1',range:760,energy:7,cooldown:.28,multiplier:.85,color:'#80dcff',description:'Instant beam · tracks selected ships'},
+ phaser:{name:'Phaser array',short:'Phaser',key:'1',range:820,energy:24,cooldown:0,multiplier:3.2,color:'#80dcff',description:'Hold fire · continuous damage · 24 energy/s'},
  laser:{name:'Heavy laser',short:'Laser',key:'2',range:1050,energy:17,cooldown:.8,multiplier:2.3,color:'#f6df88',description:'Long beam · high hull damage'},
- torpedo:{name:'Plasma torpedo',short:'Torpedo',key:'3',range:1350,energy:24,cooldown:1.5,multiplier:3.8,color:'#b59aff',description:'Straight launch · shield breaker'},
- missile:{name:'Seeker missiles',short:'Missiles',key:'4',range:1800,energy:22,cooldown:1.6,multiplier:3.2,color:'#ffad77',description:'Curved launch · guided interception'},
+ torpedo:{name:'Siege torpedo',short:'Torpedo',key:'3',range:1550,energy:35,cooldown:2.8,multiplier:14,color:'#b59aff',description:'Devastating warhead · 180 m blast · shield breaker'},
+ missile:{name:'Seeker missiles',short:'Missiles',key:'4',range:1900,energy:26,cooldown:2,multiplier:7,color:'#ffad77',description:'Heavy guided warhead · 95 m blast · vulnerable to point defence'},
+ antimatter:{name:'Antimatter torpedo',short:'Antimatter',key:'5',range:1900,energy:50,cooldown:8,multiplier:9999,color:'#d9acff',description:'Rare ammunition · 350 m singularity · annihilates ships and stations'},
 } as const;
 export type ShipSpec = {name:string;role:string;hull:number;shield:number;cargo:number;speed:number;damage:number;price:number;faction:FactionId;tier:number;size:number;weapon:WeaponId};
 const ship=(name:string,role:string,faction:FactionId,tier:number,hull:number,shield:number,cargo:number,speed:number,damage:number,price:number,size:number,weapon:WeaponId):ShipSpec=>({name,role,faction,tier,hull,shield,cargo,speed,damage,price,size,weapon});
@@ -44,6 +45,9 @@ export const SHIPS = {
  dreadnought:ship('Behemoth','Siege dreadnought','forge',3,1400,380,120,110,72,85000,2.2,'missile'),
 };
 export type ShipClass = keyof typeof SHIPS;
+export const supportsPointDefense=(id:ShipClass)=>SHIPS[id].tier>=2||['freighter','anvil','aureole'].includes(id);
+export const supportsAntimatter=(id:ShipClass)=>SHIPS[id].tier>=2;
+export const ANTIMATTER_DEPOTS=[6,12,32,40];
 export const fleetFor=(faction:FactionId)=>(Object.keys(SHIPS) as ShipClass[]).filter(id=>SHIPS[id].faction===faction);
 export type SystemSpec={id:number;name:string;region:string;faction:string;factionId:FactionId;kind:string;security:string;risk:number;x:number;y:number;color:string;planet:string;station:string;prices:number[]};
 const system=(id:number,name:string,factionId:FactionId,kind:string,risk:number,x:number,y:number,planet:string,station:string,prices:number[],color?:string):SystemSpec=>({id,name,factionId,faction:FACTIONS[factionId].name,region:['CONCORD FRONTIER','MERCHANT REACH','THE ASHEN VEIL','SOLAR SANCTUM','PELAGIC EXPANSE','THE IRON MARCH'][FACTIONS[factionId].style],kind,risk,security:risk===1?'Secure':risk===2?'Patrolled':risk===3?'Contested':'Lawless',x,y,planet,station,prices,color:color??FACTIONS[factionId].color});
@@ -73,6 +77,14 @@ export const SYSTEMS:SystemSpec[] = [
  system(22,'Styx','forge','Extraction',4,169,120,'Styx Chasm','Gate of Ash',[130,30,325,215,120,185]),
  system(23,'Kronos','forge','Fortress',3,112,133,'Kronos Bulwark','Bastion Prime',[135,95,235,245,310,125]),
 ];
+// The Far Reach shares the same traversable jump graph, with established colonies
+// and contested border systems rather than disconnected menu destinations.
+const farNames=['Ardent','Caldera','Orionis','Lacuna','Nox','Waymark','Polaris','Hesper','Talassa Gate','Umbriel','Mordant','Shade','Empyrean','Corona','Daybreak','Solstice','Triton','Nacre','Undertow','Azurite','Adamant','Emberfall','Acheron','Gorgon'];
+const originalSystems=[...SYSTEMS];
+for(let i=0;i<24;i++){
+ const base=originalSystems[i],id=i+24,name=farNames[i];
+ SYSTEMS.push(system(id,name,base.factionId,base.kind,Math.min(4,base.risk+1),base.x+180,base.y,`${name} ${['Prime','Reach','Haven','Major'][i%4]}`,`${name} ${['Anchorage','Exchange','Citadel','Relay'][i%4]}`,base.prices.map((price,j)=>Math.round(price*(.88+((i+j*3)%7)*.045)))));
+}
 export const GOODS = [
  {name:'Food supplies',unit:'t',desc:'Staples & hydroponics',icon:'food'},
  {name:'Titanium ore',unit:'t',desc:'Raw industrial material',icon:'ore'},

@@ -38,7 +38,7 @@ test('a fully completed campaign fits in small cookies without losing fields', (
   s.hull = 320; s.shield = 260; s.credits = 3456789; s.visited = SYSTEMS.map(sys => sys.id);
   s.cargo = [25, 20, 20, 20, 20, 20]; s.kills = 934; s.time = 453435.2443253;
   for (const system of SYSTEMS) {
-    const g = new Universe(); g.s.system = system.id;
+    const g = new Universe(undefined,{dynamic:false}); g.s.system = system.id;
     for (const c of g.offers) { s.contracts.push({ ...c, progress: c.quantity, done: true }); s.completed.push(c.id); }
     s.stocks[system.id] = [140, 15, 34, 52, 32, 46];
   }

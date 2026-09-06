@@ -7,10 +7,12 @@ import SpaceView from './SpaceView';
 import { GalaxyMap, StationPanel, CargoPanel, LogPanel, FlightManual } from './Panels';
 import { FactionPanel,InteractionPanel } from './Interactions';
 import FactionFlag from './FactionFlag';
+import { GalacticNews,WorldTicker } from './LivingWorld';
+import { FlightAudio } from './FlightAudio';
 import { registerGameTools } from './webmcp';
 
-type Tab = 'flight' | 'map' | 'cargo' | 'log' | 'station' | 'factions';
-const NAV = [{ id: 'flight', label: 'Flight', icon: Navigation }, { id: 'map', label: 'Galaxy', icon: Map }, { id: 'cargo', label: 'Cargo', icon: Package }, { id: 'factions', label: 'Factions', icon: Shield }, { id: 'log', label: 'Log', icon: Compass }] as const;
+type Tab = 'flight' | 'map' | 'cargo' | 'log' | 'station' | 'factions' | 'news';
+const NAV = [{ id: 'flight', label: 'Flight', icon: Navigation }, { id: 'map', label: 'Galaxy', icon: Map }, { id: 'cargo', label: 'Cargo', icon: Package }, { id: 'factions', label: 'Factions', icon: Shield }, { id: 'news', label: 'Dispatches', icon: Radio }, { id: 'log', label: 'Log', icon: Compass }] as const;
 
 export default function Game() {
   const [game] = useState(() => new Universe());
@@ -26,14 +28,16 @@ export default function Game() {
   const uiRef = useRef({ tab, help, paused, muted });
   uiRef.current = { tab, help, paused, muted };
   const audioRef = useRef<AudioContext | null>(null);
+  const flightAudio=useRef<FlightAudio | null>(null);
   const loaded = useRef(false);
   const closePanel = () => { if (game.jump !== null) setPaused(false); setTab(game.docked ? 'station' : 'flight'); };
   const closeStation = () => { game.undock(); setTab('flight'); };
   const navigate = (next: Tab) => { game.interaction=null; setContactsOpen(false); setTab(next === 'flight' && game.docked ? 'station' : next); };
   const toggleAudio = () => { if (!audioRef.current) audioRef.current = new AudioContext(); void audioRef.current.resume(); setMuted(v => !v); };
 
-  useEffect(() => { game.paused = paused || help || ['map', 'cargo', 'log', 'factions'].includes(tab) || !!game.interaction || rescued || !!pendingTransfer; game.keys.clear(); }, [game, paused, help, tab, rescued, pendingTransfer, game.interaction]);
-  useEffect(() => { if (loaded.current) { game.s.preferences = { muted, zoom: game.zoom }; game.save(); } }, [game, muted]);
+  useEffect(()=>{if(tab==='station'&&!game.docked)setTab('flight');},[tab,game.docked]);
+  useEffect(() => { game.paused = paused || help || ['map', 'cargo', 'log', 'factions', 'news'].includes(tab) || !!game.interaction || rescued || !!pendingTransfer; game.keys.clear(); game.beamTrigger=0; if(game.paused){flightAudio.current?.stopBeam();game.beamSound=false;} }, [game, paused, help, tab, rescued, pendingTransfer, game.interaction]);
+  useEffect(() => { if(muted){flightAudio.current?.stopBeam();game.beamSound=false;} if (loaded.current) { game.s.preferences = { muted, zoom: game.zoom }; game.save(); } }, [game, muted]);
   useEffect(() => {
     let saved = Universe.restore();
     if (window.location.hash.startsWith('#save=')) {
@@ -55,19 +59,9 @@ export default function Game() {
     game.onRescue = () => { setTab('station'); setRescued(true); };
     game.onRestore = () => { if (game.s.preferences) { setMuted(game.s.preferences.muted); game.zoom = game.s.preferences.zoom; } };
     game.onSound = type => {
-      const ctx = audioRef.current;
-      if (!ctx || uiRef.current.muted) return;
-      const oscillator = ctx.createOscillator(), gain = ctx.createGain();
-      const frequencies: Record<string, number[]> = { phaser:[760,260],laser:[1150,140],torpedo:[130,45],missile:[190,530], fire: [540, 130], hit: [95, 35], explode: [75, 20], trade: [520, 880], dock: [190, 380], jump: [70, 750] };
-      const [from, to] = frequencies[type] ?? [240, 120];
-      const duration = type === 'jump' ? 1.8 : type === 'explode' ? .6 : type === 'trade' ? .18 : .12;
-      oscillator.type = type === 'explode' || type === 'fire' ? 'sawtooth' : 'sine';
-      oscillator.frequency.setValueAtTime(from, ctx.currentTime);
-      oscillator.frequency.exponentialRampToValueAtTime(to, ctx.currentTime + duration);
-      gain.gain.setValueAtTime(type === 'fire' ? .025 : .045, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(.001, ctx.currentTime + duration);
-      oscillator.connect(gain); gain.connect(ctx.destination); oscillator.start(); oscillator.stop(ctx.currentTime + duration);
-      oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
+      if(type==='phaser-stop'){flightAudio.current?.stopBeam();return;}
+      const ctx=audioRef.current;if(!ctx||uiRef.current.muted)return;
+      flightAudio.current??=new FlightAudio(ctx);flightAudio.current.play(type);
     };
     const armAudio = () => { if (!uiRef.current.muted) { if (!audioRef.current) audioRef.current = new AudioContext(); void audioRef.current.resume(); } };
     const down = (e: KeyboardEvent) => {
@@ -90,11 +84,11 @@ export default function Game() {
       if (e.repeat) return;
       if (key === 't') game.cycle();
       if (key === 'h') game.hail();
-      if (['1','2','3','4'].includes(key)) game.setWeapon((Object.keys(WEAPONS) as WeaponId[])[Number(key)-1]);
+      if (['1','2','3','4','5'].includes(key)) game.setWeapon((Object.keys(WEAPONS) as WeaponId[])[Number(key)-1]);
       if (key === 'e') game.dock();
     };
     const up = (e: KeyboardEvent) => game.keys.delete(e.key.toLowerCase());
-    const blur = () => game.keys.clear();
+    const blur = () => {game.keys.clear();game.beamTrigger=0;flightAudio.current?.stopBeam();game.beamSound=false;};
     const persist = () => { game.s.preferences = { muted: uiRef.current.muted, zoom: game.zoom }; game.save(); };
     const visibility = () => { if (document.hidden) { persist(); game.keys.clear(); setPaused(true); } };
     window.addEventListener('keydown', down); window.addEventListener('keyup', up); window.addEventListener('blur', blur);
@@ -106,7 +100,7 @@ export default function Game() {
       window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', blur);
       window.removeEventListener('pointerdown', armAudio);
       window.removeEventListener('pagehide', persist); document.removeEventListener('visibilitychange', visibility);
-      clearInterval(save); unregister(); persist();
+      clearInterval(save); unregister(); persist();flightAudio.current?.stopBeam();
     };
   }, [game]);
 
@@ -117,8 +111,8 @@ export default function Game() {
   const saveBlocked = game.saveStatus === 'blocked';
   const targetAction = () => {
     if (!selected) return;
-    if (selected.kind === 'station') {if(game.dockingAllowed)game.dock();else game.hail();}
-    else if (game.isHostile(selected)) game.fire();
+    if (game.isHostile(selected)) {game.fire();if(s.weapon==='phaser')game.beamTrigger=.25;}
+    else if (selected.id === 'station') {if(game.dockingAllowed)game.dock();else game.hail();}
     else if (selected.kind !== 'salvage') game.hail();
     else { game.waypoint = { x: selected.x, y: selected.y }; game.autoDock = false; }
   };
@@ -133,25 +127,26 @@ export default function Game() {
     </header>
 
     {inFlight && <>
-      <div className="system-heading"><span className="system-coordinate">{String(s.system + 1).padStart(2, '0')} <i/> {sys.region}</span><h1>{sys.name}<span className={`security-dot risk-${sys.risk}`}/></h1><div><FactionFlag faction={sys.factionId}/><span>{sys.faction}</span><span className={`security-text risk-${game.alert||game.standing()<0?4:sys.risk}`}>{game.standing()<0?'Hostile territory':game.alert?'Security alert':sys.security}</span></div></div>
-      <div className="side-tools"><button className={contactsOpen ? 'selected' : ''} aria-label="Local contacts" title="Contacts" aria-expanded={contactsOpen} onClick={() => setContactsOpen(v => !v)}><ScanLine size={19}/>{hostiles.length > 0 && <i/>}</button><button aria-label="Dock at station" title="Dock · E" onClick={() => game.dock()}><Anchor size={19}/></button><div className="tool-separator"/><button aria-label="Zoom in" title="Zoom in" onClick={() => game.zoom = Math.min(1.8, game.zoom + .15)}><Plus size={17}/></button><button aria-label="Zoom out" title="Zoom out" onClick={() => game.zoom = Math.max(.5, game.zoom - .15)}><Minus size={17}/></button></div>
-      {contactsOpen && <aside className="contacts-drawer"><div className="section-title"><span>Contacts <small>{game.contacts.length}</small></span><button aria-label="Close contacts" onClick={() => setContactsOpen(false)}><X size={17}/></button></div>{game.contacts.map(c => <button key={c.id} className={`contact ${game.target === c.id ? 'selected' : ''} ${c.kind}`} onClick={() => { game.target = c.id; if(c.kind==='planet')game.hail(c.id); refresh(); }}><span className="contact-icon">{c.kind === 'station' ? <Orbit size={20}/> : c.kind === 'hostile' ? <Crosshair size={18}/> : c.kind === 'salvage' ? <Package size={18}/> : <Navigation size={18}/>}</span><span><strong>{c.name}</strong><small>{game.isHostile(c) ? (c.kind==='hostile'?'Outlaw':'Hostile security') : c.kind==='planet'?'Planet' : c.kind === 'station' ? 'Station' : c.kind === 'salvage' ? 'Salvage' : c.kind === 'patrol' ? 'Patrol' : 'Trader'}</small></span><em>{(distance(c, s) / 1000).toFixed(1)} <small>km</small></em></button>)}</aside>}
+      <div className="system-heading"><span className="system-coordinate">{String(s.system + 1).padStart(2, '0')} <i/> {sys.region}</span><h1>{sys.name}<span className={`security-dot risk-${sys.risk}`}/></h1><div><FactionFlag faction={game.faction}/><span>{FACTIONS[game.faction].name}</span><span className={`security-text risk-${game.alert||game.standing()<0?4:sys.risk}`}>{game.standing()<0?'Hostile territory':game.alert?'Security alert':sys.security}</span></div></div>
+      <WorldTicker game={game} open={()=>navigate('news')}/><div className="side-tools"><button className={contactsOpen ? 'selected' : ''} aria-label="Local contacts" title="Contacts" aria-expanded={contactsOpen} onClick={() => setContactsOpen(v => !v)}><ScanLine size={19}/>{hostiles.length > 0 && <i/>}</button><button aria-label="Dock at station" title="Dock · E" onClick={() => game.dock()}><Anchor size={19}/></button><div className="tool-separator"/><button aria-label="Zoom in" title="Zoom in" onClick={() => game.zoom = Math.min(1.8, game.zoom + .15)}><Plus size={17}/></button><button aria-label="Zoom out" title="Zoom out" onClick={() => game.zoom = Math.max(.5, game.zoom - .15)}><Minus size={17}/></button></div>
+      {contactsOpen && <aside className="contacts-drawer"><div className="section-title"><span>Contacts <small>{game.contacts.length}</small></span><button aria-label="Close contacts" onClick={() => setContactsOpen(false)}><X size={17}/></button></div>{game.contacts.map(c => <button key={c.id} className={`contact ${game.target === c.id ? 'selected' : ''} ${c.kind}`} onClick={() => { game.target = c.id; if(c.kind==='planet')game.hail(c.id); refresh(); }}><span className="contact-icon">{c.kind === 'station' ? <Orbit size={20}/> : c.kind === 'hostile' ? <Crosshair size={18}/> : c.kind === 'salvage' ? <Package size={18}/> : <Navigation size={18}/>}</span><span><strong>{c.name}</strong><small>{game.isHostile(c) ? (c.kind==='hostile'?'Outlaw':'Hostile security') : c.role==='invader'?'Assault fleet':c.role==='battery'?'Planetary defence':c.role==='convoy'?'Relief convoy':c.kind==='planet'?'Planet' : c.kind === 'station' ? 'Station' : c.kind === 'salvage' ? 'Salvage' : c.kind === 'patrol' ? 'Patrol' : 'Trader'}</small></span><em>{(distance(c, s) / 1000).toFixed(1)} <small>km</small></em></button>)}</aside>}
       {selected && <aside className={`target-lock ${game.isHostile(selected)?'hostile':selected.kind}`}>
        <div className="lock-heading"><Crosshair size={14}/><span>{game.isHostile(selected)?'HOSTILE':selected.kind.toUpperCase()}</span><strong>{(distance(selected,s)/1000).toFixed(2)}<small>km</small></strong></div><h2>{selected.name}</h2>
        {selected.ship&&<div className="target-class">{SHIPS[selected.ship].name} class {selected.faction&&<FactionFlag faction={selected.faction}/>}</div>}
-       {game.attackable(selected)&&selected.kind!=='station'&&<div className="target-hull"><i style={{width:`${selected.hull/selected.maxHull*100}%`}}/></div>}
-       <button className={game.isHostile(selected)?'danger':'primary'} onClick={targetAction}>{game.isHostile(selected)?<Crosshair size={15}/>:selected.kind==='station'?<Anchor size={15}/>:<Radio size={15}/>} {game.isHostile(selected)?'Fire '+game.weapon.short:selected.kind==='station'?(game.dockingAllowed?'Approach & dock':'Request clearance'):selected.kind==='salvage'?'Recover':'Hail'}<kbd>{game.isHostile(selected)?'SPACE':selected.kind==='station'?'E':'H'}</kbd></button>
+       {game.attackable(selected)&&<div className="target-hull"><i style={{width:`${selected.hull/selected.maxHull*100}%`}}/></div>}
+       <button className={game.isHostile(selected)?'danger':'primary'} onPointerDown={e=>{if(game.isHostile(selected)){e.currentTarget.setPointerCapture(e.pointerId);game.keys.add('fire');}}} onPointerUp={()=>game.keys.delete('fire')} onPointerCancel={()=>game.keys.delete('fire')} onClick={targetAction}>{game.isHostile(selected)?<Crosshair size={15}/>:selected.id==='station'?<Anchor size={15}/>:<Radio size={15}/>} {game.isHostile(selected)?'Fire '+game.weapon.short:selected.id==='station'?(game.dockingAllowed?'Approach & dock':'Request clearance'):selected.kind==='salvage'?'Recover':'Hail'}<kbd>{game.isHostile(selected)?'SPACE':selected.id==='station'?'E':'H'}</kbd></button>
        {selected.kind!=='salvage'&&<button className="target-comms" onClick={()=>game.hail()}><Radio size={13}/>Open channel</button>}
       </aside>}
       {(game.alert||game.standing()<0)&&<button className="security-alert" onClick={()=>game.hail('station')}><Shield size={16}/>{game.standing()<0?'FACTION HOSTILE':'SECURITY RESPONSE'}<span>Standing {game.standing()} · {game.s.incidents?.[s.system]?.fine??0} cr fine</span></button>}
-      <div className="weapons-rack" aria-label="Weapon selection">{(Object.entries(WEAPONS) as [WeaponId,typeof WEAPONS.phaser][]).map(([id,w])=><button key={id} style={{'--weapon-color':w.color} as React.CSSProperties} className={s.weapon===id?'selected':''} aria-pressed={s.weapon===id} title={w.description+' · '+w.energy+' energy · '+w.range+' m'} onClick={()=>game.setWeapon(id)}><kbd>{w.key}</kbd><span>{w.short}</span><small>{w.energy} E</small></button>)}</div>
-      <div className="radar-hud"><svg viewBox="0 0 180 180" role="img" aria-label="Local radar"><defs><clipPath id="radar-clip"><circle cx="90" cy="90" r="75"/></clipPath></defs><g fill="none" stroke="currentColor" strokeWidth=".6"><circle cx="90" cy="90" r="75"/><circle cx="90" cy="90" r="50"/><circle cx="90" cy="90" r="25"/><path d="M15 90h150M90 15v150"/></g><g clipPath="url(#radar-clip)">{game.contacts.map(c => <circle key={c.id} cx={90 + (c.x - s.x) / 22} cy={90 - (c.y - s.y) / 22} r={c.kind === 'station' ? 3 : 2} fill={game.isHostile(c) ? '#e88c79' : c.kind === 'station' ? '#8fd5bd' : '#8aafcc'}/>)}</g><path d="m90 85 4 10-4-2-4 2Z" fill="#d8eff7" transform={`rotate(${-s.angle * 180 / Math.PI} 90 90)`}/></svg><span>{Math.round(s.x)} / {Math.round(s.y)}</span></div>
+      <div className="weapons-rack" aria-label="Weapon selection">{(Object.entries(WEAPONS) as [WeaponId,typeof WEAPONS.phaser][]).map(([id,w])=><button key={id} style={{'--weapon-color':w.color} as React.CSSProperties} className={s.weapon===id?'selected':''} aria-pressed={s.weapon===id} title={w.description+' · '+w.energy+' energy · '+w.range+' m'} disabled={id==='antimatter'&&(!s.equipment?.antimatter||!s.equipment.ammo||SHIPS[s.ship].tier<2)} onClick={()=>game.setWeapon(id)}><kbd>{w.key}</kbd><span>{w.short}</span><small>{id==='antimatter'?s.equipment?.antimatter?(s.equipment.ammo+' loaded'):'Locked':w.energy+(id==='phaser'?' E/s':' E')}</small></button>)}</div>
+      {!!s.equipment?.pointDefense&&<div className="pd-status"><Shield size={13}/>{SHIPS[s.ship].tier>=2||['freighter','anvil','aureole'].includes(s.ship)?'PD '+s.equipment.pointDefense+' online':'PD incompatible'}<span>{game.interceptions} intercepted</span></div>}<div className="radar-hud"><svg viewBox="0 0 180 180" role="img" aria-label="Local radar"><defs><clipPath id="radar-clip"><circle cx="90" cy="90" r="75"/></clipPath></defs><g fill="none" stroke="currentColor" strokeWidth=".6"><circle cx="90" cy="90" r="75"/><circle cx="90" cy="90" r="50"/><circle cx="90" cy="90" r="25"/><path d="M15 90h150M90 15v150"/></g><g clipPath="url(#radar-clip)">{game.contacts.map(c => <circle key={c.id} cx={90 + (c.x - s.x) / 22} cy={90 - (c.y - s.y) / 22} r={c.kind === 'station' ? 3 : 2} fill={game.isHostile(c) ? '#e88c79' : c.kind === 'station' ? '#8fd5bd' : '#8aafcc'}/>)}</g><path d="m90 85 4 10-4-2-4 2Z" fill="#d8eff7" transform={`rotate(${-s.angle * 180 / Math.PI} 90 90)`}/></svg><span>{Math.round(s.x)} / {Math.round(s.y)}</span></div>
       <div className="cockpit"><div className="vessel-block"><Rocket size={24}/><div><strong>{stats.name}</strong><span>{stats.role}</span></div></div><div className="cockpit-meters">{[{ name: 'Hull', value: s.hull, max: stats.hull, style: 'hull' }, { name: 'Shield', value: s.shield, max: stats.shield, style: 'shield' }, { name: 'Energy', value: s.energy, max: 100, style: 'energy' }].map(m => <div className={`meter ${m.style}`} key={m.name}><div><span>{m.name}</span><strong>{Math.round(m.value / m.max * 100)}<small>%</small></strong></div><div className="bar"><i style={{ width: `${Math.max(0, m.value / m.max * 100)}%` }}/></div></div>)}</div><div className="velocity"><strong>{speed}<small>m/s</small></strong><span>{game.waypoint ? 'AUTOPILOT' : game.keys.has('shift') && speed > stats.speed ? 'BOOST' : 'IMPULSE'}</span></div><button className="cargo-chip" title="Cargo" onClick={() => navigate('cargo')}><Package size={16}/><span>{game.usedCargo}<small>/{stats.cargo} t</small></span></button></div>
       <div className="flight-shortcuts"><span><kbd>W A S D</kbd> Fly</span><span><kbd>SPACE</kbd> Fire</span><span><kbd>T</kbd> Target</span><span><kbd>H</kbd> Hail</span><span><kbd>SHIFT</kbd> Boost</span></div>
       <div className="touch-controls">{[['a', '↶'], ['w', '↑'], ['d', '↷'], ['s', '↓'], ['fire', '◎']].map(([key, label]) => <button key={key} aria-label={key === 'fire' ? 'Fire weapons' : key === 'w' ? 'Thrust' : key === 's' ? 'Brake' : key === 'a' ? 'Turn left' : 'Turn right'} onPointerDown={e => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); game.keys.add(key); }} onPointerUp={() => game.keys.delete(key)} onPointerCancel={() => game.keys.delete(key)}>{label}</button>)}</div>
     </>}
 
     {game.interaction&&<InteractionPanel game={game} close={()=>{game.interaction=null;refresh();}}/>}
+    {tab === 'news'&&<GalacticNews game={game} close={closePanel}/>}
     {tab === 'factions'&&<FactionPanel game={game} close={closePanel}/>}
     {tab === 'map' && <GalaxyMap game={game} close={closePanel}/>}
     {tab === 'station' && game.docked && <StationPanel game={game} close={closeStation}/>}
