@@ -1,35 +1,38 @@
-# Voidwake: The Outer Reach
+# Voidwake — The Outer Reach
 
-An original single-player space sandbox inspired by the trading, travel, and combat of classic Flash-era space games.
+Play: https://samcousinsgb.github.io/voidwake/
 
-## Play
+A single-player space sandbox with top-down flight, procedural 3D ships and planets, layered parallax, seven systems, trading, combat, contracts, and ship upgrades.
 
-- W / Up: thrust; A and D / Left and Right: steer; S / Down: brake.
-- Shift: boost; Space: fire pulse cannons; T: cycle hostile targets.
-- Click empty space to set an autopilot waypoint. Click a contact to select it.
-- E: approach and dock automatically. M: galaxy map. Escape: pause or close a panel.
-- Scroll or use the on-screen buttons to zoom. Touch controls appear on small screens.
-- Enable audio with the speaker control. Audio starts muted.
+## Controls
 
-Start by docking at Port Meridian. Accept a supplied freight contract or buy food in Solace and sell it in Cinder. Use the galaxy map to compare actual destination resale prices and fuel costs. Bounties offer a more dangerous source of credits.
+W / Up thrusts, A and D steer, S brakes, Shift boosts, Space fires, T cycles hostile targets, E approaches and docks, and M opens the galaxy map. Click empty space for autopilot. Scroll to zoom. Touch controls appear on small screens. The question-mark button opens the controls.
 
-## Implemented
+## Saves
 
-Seven connected systems, each with a local economy, security level, station, inhabited planet, moon, ringed gas giant, star, asteroid belt and local ships. Three player ship classes and four upgrade tracks. Real-time flight and combat run on a 2D plane with Three.js orthographic rendering of procedural 3D assets. No downloaded images, runtime asset services, or external game art are required.
+All automatic saves use compressed, path-scoped cookies. The save includes ship, docking state, position, motion, resources, cargo, market stocks, upgrades, contracts, visited systems, reputation, flight time, sound preference, and zoom. Cookies use SameSite=Lax, Secure on HTTPS, and a one-year lifetime refreshed on save. There are no localStorage save writes or IndexedDB saves.
 
-Markets enforce stock, cargo capacity, available credits, a resale spread, and reserved contract cargo. Freight, bounty, and exploration contracts can be accepted at stations. Pirates drop credits and salvage. Defeat recovers the player at a station for lost cargo and 10% of credits. Emergency towing supplies reserve fuel even when credits run out.
+Writes use alternating banks, a checksum, read-back verification, and a previous-save fallback. The UI reports blocked cookies instead of claiming success. The legacy version's localStorage record is read once and removed only after it has been saved successfully to cookies on that same origin.
 
-Progress saves locally every five seconds and after transactions. It is specific to the current browser and site origin. The save includes the ship, position, credits, cargo, local market stocks, upgrades, contracts, reputation, and visited systems. Local contacts respawn on system entry and reloading. Navigation, the manifest, the log, and the flight manual pause the simulation; hiding the browser tab also pauses it.
+The Log contains optional Export and Import controls. When opened at the previous address, it also offers Continue on GitHub Pages. This carries a compressed save in a URL fragment, which is removed after reading. Existing progress at the destination is protected by a replacement confirmation. Cookies cannot migrate between domains on their own.
 
 ## Development
 
-Requires Node 24 or later for the test runner's native TypeScript support. Run `npm install`, then `npm run dev`.
+Node 24+ and npm are required.
 
-- `npm test`: deterministic simulation and action-contract checks.
-- `npx tsc --noEmit`: TypeScript validation.
-- `npm run build`: Cloudflare-compatible production build.
-- `npm start`: local production worker.
+- `npm ci`
+- `npm run dev:pages` — local static application at http://127.0.0.1:4175/
+- `npm test` — simulation, cookie persistence, transfer, corruption, and parallax checks
+- `npx tsc --noEmit` — type checking
+- `npm run build:pages` — static output in `dist-pages/`
+- `npm run preview:pages` — serve the production static output locally
 
-Primary implementation lives in `app/game/engine.ts`, `SpaceView.tsx`, `Game.tsx`, `Panels.tsx`, and `webmcp.ts`. The optional WebMCP surface shares the exact simulation actions used by the interface. Browser support is feature-detected; normal controls work independently.
+Pushing `main` runs the checked GitHub Pages workflow: tests, type checks, static build, then deployment. It uses pinned revisions of the official GitHub Actions. GitHub Pages serves static assets only; there is no application server, account service, or shared gameplay database.
 
-The tests validate the simulation and optional tool action contracts. They are not browser interaction or screenshot tests. The current browser tooling did not expose a WebMCP invocation context, so live browser tool registration was not verified.
+The original Sites configuration and `npm run build` remain available for the private migration address. They are not involved in the GitHub Pages build.
+
+## Implementation
+
+`app/game/engine.ts` owns the simulation; `cookies.ts` owns persistence. `Game.tsx` and `Panels.tsx` implement the interface. `SpaceView.tsx` renders 3D assets, and `SpaceBackground.ts` applies the independent nebula and star layers defined in `parallax.ts`.
+
+The optional WebMCP actions call the same engine operations as the interface. Their action contracts are tested; live WebMCP registration was not tested because the available browser tooling does not expose an invocation context. Verification covers automated logic checks and production asset checks, not a browser interaction or screenshot playtest.

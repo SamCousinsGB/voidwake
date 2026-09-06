@@ -1,3 +1,4 @@
+import { loadCookieSave, saveToCookies } from './cookies.ts';
 export const SYSTEMS = [
  {id:0,name:'Solace',region:'THE INNER FRONTIER',faction:'Concord Union',kind:'Agricultural',security:'Secure',risk:1,x:24,y:55,color:'#6bc4ee',planet:'Solace Prime',station:'Port Meridian',prices:[42,112,210,76,340,165]},
  {id:1,name:'Cinder',region:'THE ASHEN BELT',faction:'Free Traders',kind:'Industrial',security:'Contested',risk:2,x:42,y:70,color:'#e89d6b',planet:'Cinder IV',station:'Foundry Nine',prices:[88,58,295,120,250,200]},
@@ -28,7 +29,7 @@ export type Contract = {id:string,title:string,type:'delivery'|'bounty'|'explore
 export type GameState = {
  version:1; system:number; x:number;y:number;vx:number;vy:number;angle:number; hull:number;shield:number;energy:number;fuel:number;credits:number;
  ship:ShipClass; upgrades:{weapon:number;shield:number;engine:number;cargo:number}; cargo:number[];stocks:Record<number,number[]>;
- kills:number;profit:number;visited:number[];contracts:Contract[];completed:string[];reputation:number;time:number;
+ kills:number;profit:number;visited:number[];contracts:Contract[];completed:string[];reputation:number;time:number;docked?:boolean;preferences?:{muted:boolean;zoom:number};
 };
 export const STATION = {x:300,y:20};
 export const SAVE_KEY = 'voidwake-save-v1';
@@ -40,8 +41,9 @@ export class Universe {
  s:GameState=initialState(); contacts:Contact[]=[];bullets:Bullet[]=[];particles:Particle[]=[];
  keys=new Set<string>(); target:string='station'; waypoint:{x:number;y:number}|null=null;
  paused=false;docked=false;autoDock=false;jump:number|null=null;jumpTime=0;cooldown=0;sinceHit=10;shotId=0;
- zoom=1;message='Welcome, Captain. Port Meridian is clearing your approach.';messageTime=10;toastKind='info';
+ zoom=1;message='';messageTime=0;toastKind='info';
  onChange:()=>void=()=>{}; onDock:()=>void=()=>{};onRescue:()=>void=()=>{};onSound:(type:string)=>void=()=>{};
+ onRestore:()=>void=()=>{};
  constructor(state?:GameState) { if(state)this.s=state;this.populate(); }
  get stats(){const b=SHIPS[this.s.ship];return {...b,hull:b.hull,shield:b.shield+this.s.upgrades.shield*40,cargo:b.cargo+this.s.upgrades.cargo*15,speed:b.speed+this.s.upgrades.engine*25,damage:b.damage+this.s.upgrades.weapon*8};}
  get usedCargo(){return this.s.cargo.reduce((a,b)=>a+b,0);}
@@ -51,22 +53,46 @@ export class Universe {
  get nearby(){return distance(this.s,STATION)<185;}
  get stock(){return this.s.stocks[this.s.system]??(this.s.stocks[this.s.system]=[80,60,45,70,30,55]);}
  get price(){return SYSTEMS[this.s.system].prices;}
- notify(message:string,kind='info'){this.message=message;this.messageTime=7;this.toastKind=kind;this.onChange();}
+ notify(message:string,kind='info'){this.message=message;this.messageTime=3.5;this.toastKind=kind;this.onChange();}
  populate(){
   const sys=SYSTEMS[this.s.system];this.contacts=[{id:'station',name:sys.station,kind:'station',...STATION,vx:0,vy:0,angle:0,hull:5000,maxHull:5000,shield:2000,fire:0}];
   for(let i=0;i<3;i++)this.contacts.push({id:`trader-${i}`,name:['MV Wayfarer','CSV Resolute','MV Far Horizon'][i],kind:i===1?'patrol':'trader',x:320-i*260,y:-280+i*420,vx:0,vy:0,angle:i*1.7,hull:180,maxHull:180,shield:80,fire:0});
   for(let i=0;i<sys.risk+1;i++)this.contacts.push({id:`pirate-${i}`,name:['Ashen Marauder','Syndicate Raider','Outlaw Corsair','Ashen Reaver','Syndicate Fang'][i],kind:'hostile',x:1050+250*Math.cos(i*2),y:-500+i*300,vx:0,vy:0,angle:-1,hull:70+sys.risk*12,maxHull:70+sys.risk*12,shield:0,fire:2+i});
   this.bullets=[];this.particles=[];this.target='station';
  }
- save(){if(typeof localStorage!=='undefined'){try{localStorage.setItem(SAVE_KEY,JSON.stringify(this.s));return true;}catch{return false;}}return false;}
- static restore(){try{const raw=localStorage.getItem(SAVE_KEY);if(!raw)return null;const s=JSON.parse(raw);if(s.version!==1||!SYSTEMS[s.system]||!SHIPS[s.ship as ShipClass]||!Array.isArray(s.cargo)||s.cargo.length!==6||!Array.isArray(s.contracts)||!s.upgrades||!s.stocks)return null;for(const k of ['x','y','vx','vy','angle','credits','hull','shield','fuel','energy','time','kills','profit','reputation'])if(!Number.isFinite(s[k]))return null;if(s.credits<0||s.fuel<0||s.fuel>100||s.cargo.some((n:number)=>!Number.isInteger(n)||n<0))return null;for(const k of ['weapon','shield','engine','cargo'])if(!Number.isInteger(s.upgrades[k])||s.upgrades[k]<0||s.upgrades[k]>3)return null;if(!Array.isArray(s.visited)||!Array.isArray(s.completed))return null;return s as GameState;}catch{return null;}}
- dock(){if(this.jump!==null)return false;if(!this.nearby){this.waypoint={...STATION};this.autoDock=true;this.notify('Approach plotted. Autopilot will dock at the station.');return false;}this.docked=true;this.autoDock=false;this.waypoint=null;this.s.vx=this.s.vy=0;this.save();this.onDock();this.onSound('dock');this.notify(`Docked at ${SYSTEMS[this.s.system].station}.`);return true;}
- undock(){this.docked=false;this.s.x=STATION.x-160;this.s.y=STATION.y-65;this.s.vx=this.s.vy=0;this.notify('Docking clamps released. Safe travels, Captain.');}
+ saveStatus:'pending'|'saved'|'blocked'='pending';
+ save(){this.s.docked=this.docked;const ok=saveToCookies(this.s);this.saveStatus=ok?'saved':'blocked';return ok;}
+ static validate(raw:unknown):GameState|null {
+  try {
+   if(!raw||typeof raw!=='object')return null;
+   const s=raw as GameState;
+   if(s.version!==1||!Number.isInteger(s.system)||!SYSTEMS[s.system]||!Object.prototype.hasOwnProperty.call(SHIPS,s.ship))return null;
+   const finite=(value:unknown)=>typeof value==='number'&&Number.isFinite(value);
+   for(const key of ['x','y','vx','vy','angle','credits','hull','shield','fuel','energy','time','kills','profit','reputation'] as const)if(!finite(s[key]))return null;
+   if(s.credits<0||s.fuel<0||s.fuel>100||s.energy<0||s.energy>100||s.shield<0||s.time<0)return null;
+   if(!s.upgrades||['weapon','shield','engine','cargo'].some(key=>!Number.isInteger(s.upgrades[key as keyof typeof s.upgrades])||s.upgrades[key as keyof typeof s.upgrades]<0||s.upgrades[key as keyof typeof s.upgrades]>3))return null;
+   if(!Array.isArray(s.cargo)||s.cargo.length!==6||s.cargo.some(n=>!Number.isInteger(n)||n<0))return null;
+   if(s.cargo.reduce((a,b)=>a+b,0)>SHIPS[s.ship].cargo+s.upgrades.cargo*15)return null;
+   if(!s.stocks||typeof s.stocks!=='object'||Object.entries(s.stocks).some(([id,v])=>!SYSTEMS[Number(id)]||!Array.isArray(v)||v.length!==6||v.some(n=>!Number.isInteger(n)||n<0)))return null;
+   if(!Array.isArray(s.visited)||s.visited.some(id=>!Number.isInteger(id)||!SYSTEMS[id])||!Array.isArray(s.completed)||s.completed.some(id=>typeof id!=='string'))return null;
+   if(!Array.isArray(s.contracts)||s.contracts.length>21||s.contracts.some(c=>!c||typeof c.id!=='string'||typeof c.title!=='string'||c.title.length>150||!['delivery','bounty','explore'].includes(c.type)||!Number.isInteger(c.target)||!SYSTEMS[c.target]||!Number.isInteger(c.origin)||!SYSTEMS[c.origin]||!Number.isInteger(c.quantity)||c.quantity<1||c.quantity>90||!finite(c.reward)||c.reward<0||!finite(c.progress)||c.progress<0||typeof c.done!=='boolean'||(c.type==='delivery'&&(!Number.isInteger(c.good)||!GOODS[c.good!]))))return null;
+   if(s.preferences&&(typeof s.preferences.muted!=='boolean'||!finite(s.preferences.zoom)||s.preferences.zoom<.5||s.preferences.zoom>1.8))return null;
+   return s;
+  }catch{return null;}
+ }
+ static restore(){
+  const cookieState=Universe.validate(loadCookieSave());
+  if(cookieState)return cookieState;
+  // One-time migration: never write saves to localStorage, and only remove the old copy after verified cookie storage.
+  try{if(typeof localStorage==='undefined')return null;const raw=localStorage.getItem(SAVE_KEY);if(!raw)return null;const legacy=Universe.validate(JSON.parse(raw));if(!legacy)return null;if(saveToCookies(legacy))localStorage.removeItem(SAVE_KEY);return legacy;}catch{return null;}
+ }
+ dock(){if(this.jump!==null)return false;if(!this.nearby){this.waypoint={...STATION};this.autoDock=true;this.notify('Docking approach set.');return false;}this.docked=true;this.autoDock=false;this.waypoint=null;this.s.vx=this.s.vy=0;this.save();this.onDock();this.onSound('dock');this.notify(`Docked at ${SYSTEMS[this.s.system].station}.`);return true;}
+ undock(){this.docked=false;this.s.x=STATION.x-160;this.s.y=STATION.y-65;this.s.vx=this.s.vy=0;this.notify('Undocked.');}
  trade(good:number,quantity:number,buy:boolean){if(!this.docked)return {ok:false,message:'Dock at a station to trade.'};if(!Number.isInteger(good)||!GOODS[good]||!Number.isInteger(quantity)||quantity<1||typeof buy!=='boolean')return {ok:false,message:'Choose a valid item and quantity.'};const price=buy?this.price[good]:Math.floor(this.price[good]*0.85);if(buy&&(this.s.credits<price*quantity||this.usedCargo+quantity>this.stats.cargo||this.stock[good]<quantity))return {ok:false,message:'Not enough credits, cargo space, or market stock.'};if(!buy&&this.availableCargo(good)<quantity)return {ok:false,message:'Not enough unreserved cargo to sell.'};this.s.credits+=(buy?-1:1)*price*quantity;this.s.cargo[good]+=(buy?1:-1)*quantity;this.stock[good]+=(buy?-1:1)*quantity;if(!buy)this.s.profit+=price*quantity;this.onSound('trade');this.save();this.notify(`${buy?'Purchased':'Sold'} ${quantity} t of ${GOODS[good].name.toLowerCase()} for ${price*quantity} cr.`);return {ok:true,message:this.message};}
  service(type:'repair'|'fuel'){if(!this.docked)return;const missing=type==='repair'?Math.ceil(this.stats.hull-this.s.hull):Math.ceil(100-this.s.fuel);const cost=missing*(type==='repair'?3:4);if(this.s.credits<cost){this.notify('Not enough credits for this service.','error');return;}this.s.credits-=cost;if(type==='repair'){this.s.hull=this.stats.hull;this.s.shield=this.stats.shield;}else this.s.fuel=100;this.save();this.notify(type==='repair'?'Hull repaired. Shields restored.':'Jump fuel replenished.');}
- upgrade(type:keyof GameState['upgrades']){if(!this.docked)return;const level=this.s.upgrades[type];const cost=(level+1)*[900,750,650,600][['weapon','shield','engine','cargo'].indexOf(type)];if(level>=3||this.s.credits<cost)return;this.s.credits-=cost;this.s.upgrades[type]++;this.save();this.notify('Upgrade installed and calibrated.');this.onSound('trade');}
+ upgrade(type:keyof GameState['upgrades']){if(!this.docked)return;const level=this.s.upgrades[type];const cost=(level+1)*[900,750,650,600][['weapon','shield','engine','cargo'].indexOf(type)];if(level>=3||this.s.credits<cost)return;this.s.credits-=cost;this.s.upgrades[type]++;this.save();this.notify('Upgrade installed.');this.onSound('trade');}
  buyShip(ship:ShipClass){const next=SHIPS[ship];if(!this.docked||ship===this.s.ship||this.s.credits<next.price||this.usedCargo>next.cargo+this.s.upgrades.cargo*15)return;this.s.credits-=next.price;this.s.ship=ship;this.s.hull=this.stats.hull;this.s.shield=this.stats.shield;this.save();this.notify(`${next.name} is ready in your berth. Upgrades transferred.`);}
- startJump(id:number){if(!Number.isInteger(id)||!SYSTEMS[id]||id===this.s.system)return false;if(systemDistance(this.s.system,id)>5.8){this.notify('Destination exceeds jump range. Plot an intermediate stop.','error');return false;}if(this.s.fuel<fuelCost(this.s.system,id)){this.notify('Insufficient jump fuel. Refuel at a station.','error');return false;}if(this.docked||this.jump!==null){this.notify('Undock before engaging the jump drive.','error');return false;}this.jump=id;this.jumpTime=3;this.waypoint=null;this.autoDock=false;this.onSound('jump');this.notify(`Jump drive charging. Destination: ${SYSTEMS[id].name}.`);return true;}
+ startJump(id:number){if(!Number.isInteger(id)||!SYSTEMS[id]||id===this.s.system)return false;if(systemDistance(this.s.system,id)>5.8){this.notify('Destination exceeds jump range. Plot an intermediate stop.','error');return false;}if(this.s.fuel<fuelCost(this.s.system,id)){this.notify('Insufficient fuel.','error');return false;}if(this.docked||this.jump!==null){this.notify('Undock before engaging the jump drive.','error');return false;}this.jump=id;this.jumpTime=3;this.waypoint=null;this.autoDock=false;this.onSound('jump');this.notify(`Jump drive charging. Destination: ${SYSTEMS[id].name}.`);return true;}
  get offers():Contract[]{const origin=this.s.system;const target=(origin+1)%SYSTEMS.length;return [{id:`delivery-${origin}`,title:`Supplies for ${SYSTEMS[target].name}`,type:'delivery',origin,target,reward:1100+SYSTEMS[target].risk*250,good:0,quantity:8,progress:0,done:false},{id:`bounty-${origin}`,title:'Clear the trade lanes',type:'bounty',origin,target:origin,reward:1700+SYSTEMS[origin].risk*200,quantity:2,progress:0,done:false},{id:`explore-${origin}`,title:`Chart a route to ${SYSTEMS[(origin+2)%7].name}`,type:'explore',origin,target:(origin+2)%7,reward:750,quantity:1,progress:0,done:false}].filter(c=>!this.s.completed.includes(c.id)&&!this.s.contracts.some(a=>a.id===c.id)) as Contract[];}
  accept(id:string){const c=this.offers.find(o=>o.id===id);if(!this.docked||!c||this.s.contracts.filter(a=>!a.done).length>=3)return;if(c.type==='delivery'){if(this.usedCargo+c.quantity>this.stats.cargo){this.notify('Free up 8 t of cargo space to load the shipment.','error');return;}this.s.cargo[c.good!]+=c.quantity;}this.s.contracts.push({...c});this.save();this.notify(`Contract accepted: ${c.title}.`);}
  complete(id:string){const c=this.s.contracts.find(c=>c.id===id);if(!c||c.done||!this.docked)return;if(c.type==='delivery'){if(this.s.system!==c.target||this.s.cargo[c.good!]<c.quantity)return;this.s.cargo[c.good!]-=c.quantity;}else if(c.type==='bounty'?(c.progress<c.quantity||this.s.system!==c.origin):(this.s.system!==c.target))return;c.done=true;this.s.credits+=c.reward;this.s.reputation+=5;this.s.completed.push(c.id);this.save();this.notify(`Contract complete. +${c.reward} cr. Reputation increased.`);this.onSound('trade');}

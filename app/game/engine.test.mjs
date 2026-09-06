@@ -47,9 +47,6 @@ test('services and upgrades charge exactly and obey maximum levels',()=>{
 test('pause freezes physics and jump countdown',()=>{
  const g=new Universe();g.startJump(1);g.paused=true;const before=JSON.stringify(g.s);step(g,10);assert.equal(JSON.stringify(g.s),before);assert.equal(g.jumpTime,3);g.paused=false;step(g,4);assert.equal(g.s.system,1);
 });
-test('local save roundtrip restores progress and ignores malformed saves',()=>{
- const values=new Map();globalThis.localStorage={setItem:(key,value)=>values.set(key,value),getItem:key=>values.get(key)??null};const g=atStation();g.trade(0,5,true);assert.equal(g.save(),true);assert.deepEqual(Universe.restore(),g.s);localStorage.setItem(SAVE_KEY,'{broken');assert.equal(Universe.restore(),null);localStorage.setItem(SAVE_KEY,JSON.stringify({...g.s,credits:-20}));assert.equal(Universe.restore(),null);localStorage.setItem(SAVE_KEY,JSON.stringify({...g.s,cargo:[-5,0,0,0,0,0]}));assert.equal(Universe.restore(),null);delete globalThis.localStorage;
-});
 test('WebMCP action contract uses shared state and refuses invalid input',()=>{
  const g=atStation();let updates=0;const tools=gameTools(g,()=>updates++);assert.deepEqual(tools.map(t=>t.name),['get_flight_status','trade_commodity','start_station_approach']);assert.equal(tools[0].annotations.readOnlyHint,true);assert.equal(tools[1].annotations.readOnlyHint,false);assert.equal(tools[1].execute({commodity:0,tonnes:5,side:'buy'}).ok,true);assert.equal(tools[0].execute({}).cargo[0],5);const before=JSON.stringify(g.s);assert.throws(()=>tools[1].execute({commodity:0,tonnes:-2,side:'delete'}));assert.equal(JSON.stringify(g.s),before);assert.equal(tools[1].execute({commodity:0,tonnes:-2,side:'buy'}).ok,false);assert.ok(updates>0);g.undock();g.s.x=0;g.s.y=-80;assert.equal(tools[2].execute({}).autopilot,true);
 });
