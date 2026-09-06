@@ -14,20 +14,20 @@ export function createSpaceBackground(scene: THREE.Scene, pixelRatio: number) {
 
   const nebulaMaterial = new THREE.ShaderMaterial({
     depthWrite: false,
-    uniforms: { time: { value: 0 }, tint: { value: new THREE.Color('#367a93') } },
+    uniforms: { time: { value: 0 }, tint: { value: new THREE.Color('#367a93') },accent:{value:new THREE.Color('#416bc6')},style:{value:0},seed:{value:0} },
     vertexShader: 'varying vec2 uvPos;void main(){uvPos=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
-    fragmentShader: `varying vec2 uvPos;uniform float time;uniform vec3 tint;${noise}
+    fragmentShader: `varying vec2 uvPos;uniform float time;uniform vec3 tint;uniform vec3 accent;uniform float style;uniform float seed;${noise}
 void main(){
- vec2 p=(uvPos-.5)*21.;
+ vec2 p=(uvPos-.5)*21.;float angle=style*.41; p=mat2(cos(angle),-sin(angle),sin(angle),cos(angle))*p;p+=vec2(seed*.17,seed*.09);
  float warp=fbm(vec3(p*.83,2.8));
  float clouds=fbm(vec3(p*1.4+warp*2.,4.3));
  float wisps=fbm(vec3(p*3.5+clouds*3.,8.1));
- float lane=exp(-pow(p.y*.65-p.x*.29+warp*1.2-.35,2.)*1.6);
+ float lane=exp(-pow(p.y*.65-p.x*.29+warp*1.2-.35,2.)*1.6);if(style>2.5&&style<3.5)lane=exp(-pow(length(p-vec2(1.2,0.))-2.3,2.)*1.8);if(style>3.5&&style<4.5)lane=max(lane,exp(-pow(p.y+p.x*.4+warp*2.+2.,2.)));
  float density=smoothstep(.29,.74,clouds)*lane;
  vec3 blue=mix(vec3(.011,.025,.048),tint*.34,density);
- vec3 violet=vec3(.11,.055,.13)*density*smoothstep(-1.,2.,p.x);
+ vec3 violet=accent*.22*density*smoothstep(-1.,2.,p.x);
  vec3 dust=vec3(.025,.019,.038)*smoothstep(.35,.61,wisps)*lane;
- vec3 light=vec3(.11,.28,.32)*pow(density,3.)*wisps;
+ vec3 light=tint*.4*pow(density,3.)*wisps;
  gl_FragColor=vec4(max(vec3(.006,.012,.024),blue+violet+light-dust),1.);
 }`,
   });
@@ -72,6 +72,6 @@ void main(){
       for (const { object, depth } of layers) { object.position.x = parallaxOffset(x, depth); object.position.y = parallaxOffset(y, depth); }
       for (const material of materials) material.uniforms.time.value = time;
     },
-    setSystem(color: string) { nebulaMaterial.uniforms.tint.value.set(color).multiplyScalar(.70); },
+    setSystem(color:string,accent=color,style=0,seed=0){nebulaMaterial.uniforms.tint.value.set(color).multiplyScalar(.85);nebulaMaterial.uniforms.accent.value.set(accent);nebulaMaterial.uniforms.style.value=style;nebulaMaterial.uniforms.seed.value=seed;},
   };
 }

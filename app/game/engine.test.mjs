@@ -17,8 +17,8 @@ test('market enforces credits, capacity, integer quantity, cargo and station acc
 test('travel consumes exact fuel once, visits new system and preserves cargo',()=>{
  const g=new Universe();g.s.cargo[0]=8;const fuel=g.s.fuel;assert.equal(g.startJump(5),false,'far system requires intermediate jump');assert.equal(g.startJump(1),true);assert.equal(g.startJump(2),false,'only one jump can be queued');step(g,4);assert.equal(g.s.system,1);assert.equal(g.s.fuel,fuel-fuelCost(0,1));assert.equal(g.s.cargo[0],8);assert.deepEqual(g.s.visited,[0,1]);assert.equal(g.jump,null);assert.equal(g.startJump(1),false);g.s.fuel=0;assert.equal(g.startJump(0),false);
 });
-test('all seven systems are connected within jump range',()=>{
- const visited=new Set([0]);let changed=true;while(changed){changed=false;for(const a of [...visited])for(const b of SYSTEMS)if(systemDistance(a,b.id)<=5.8&&!visited.has(b.id)){visited.add(b.id);changed=true;}}assert.equal(visited.size,7);
+test('all expanded systems are connected within jump range',()=>{
+ const visited=new Set([0]);let changed=true;while(changed){changed=false;for(const a of [...visited])for(const b of SYSTEMS)if(systemDistance(a,b.id)<=5.8&&!visited.has(b.id)){visited.add(b.id);changed=true;}}assert.equal(visited.size,SYSTEMS.length);
 });
 test('a complete trade route produces the expected profit after fuel',()=>{
  const g=atStation();g.trade(0,20,true);g.undock();g.startJump(1);step(g,3.1);g.dock();step(g,12);assert.equal(g.docked,true);g.trade(0,20,false);assert.equal(g.s.credits,2400-20*42+20*74);assert.equal(g.usedCargo,0);assert.equal(g.s.fuel,80-fuelCost(0,1));
@@ -29,7 +29,7 @@ test('freight contracts reserve cargo, deliver at destination and pay only once'
 test('abandoning a freight contract reclaims the supplied cargo',()=>{
  const g=atStation();g.accept('delivery-0');g.cancelContract('delivery-0');assert.equal(g.usedCargo,0);assert.equal(g.s.contracts.length,0);assert.equal(g.s.credits,2400);
 });
-test('pulse cannon hits targeted hostiles, grants bounty and creates salvage',()=>{
+test('phaser array hits targeted hostiles, grants bounty and creates salvage',()=>{
  const g=new Universe();g.s.x=800;g.s.y=0;g.contacts=g.contacts.filter(c=>c.kind==='station');g.contacts.push({id:'pirate-0',name:'Target',kind:'hostile',x:1050,y:0,vx:0,vy:0,angle:0,hull:80,maxHull:80,shield:0,fire:99});g.target='pirate-0';g.keys.add(' ');const before=g.s.credits;step(g,5);assert.equal(g.s.kills,1);assert.equal(g.s.credits,before+240);assert.ok(g.contacts.some(c=>c.kind==='salvage'));assert.ok(!g.contacts.some(c=>c.id==='pirate-0'));assert.ok(g.s.energy>=0);
 });
 test('hostile shots deplete shields then damage the hull; shields regenerate',()=>{
